@@ -10,7 +10,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from mitsubishi_comfort import IndoorUnit, KumoStation, MitsubishiCloudAccount
-from mitsubishi_comfort.discovery import probe_candidate_ips
 
 from .const import CONF_CONNECT_TIMEOUT, CONF_RESPONSE_TIMEOUT, DOMAIN, PLATFORMS
 from .coordinator import MitsubishiComfortCoordinator

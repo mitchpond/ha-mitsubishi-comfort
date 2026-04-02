@@ -6,9 +6,31 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import PERCENTAGE, SIGNAL_STRENGTH_DECIBELS, UnitOfTemperature
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
 from mitsubishi_comfort import IndoorUnit, KumoStation
 
+from .const import DOMAIN
 from .coordinator import MitsubishiComfortCoordinator
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    """Set up Mitsubishi Comfort sensor entities."""
+    coordinators = hass.data[DOMAIN][entry.entry_id]
+    entities = []
+    for coordinator in coordinators.values():
+        entities.append(MitsubishiComfortTemperatureSensor(coordinator))
+        entities.append(MitsubishiComfortHumiditySensor(coordinator))
+        entities.append(MitsubishiComfortWifiSignalSensor(coordinator))
+        entities.append(MitsubishiComfortSensorBatterySensor(coordinator))
+        entities.append(MitsubishiComfortSensorSignalSensor(coordinator))
+        if isinstance(coordinator.device, KumoStation):
+            entities.append(MitsubishiComfortOutdoorTemperatureSensor(coordinator))
+    async_add_entities(entities)
 
 
 class MitsubishiComfortSensorBase(CoordinatorEntity[MitsubishiComfortCoordinator], SensorEntity):

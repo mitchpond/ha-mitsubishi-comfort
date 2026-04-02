@@ -13,12 +13,29 @@ from homeassistant.components.climate.const import (
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
 from mitsubishi_comfort import IndoorUnit
 from mitsubishi_comfort.types import CommandResult, FanSpeed, Mode, VaneDirection
 
+from .const import DOMAIN
 from .coordinator import MitsubishiComfortCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    """Set up Mitsubishi Comfort climate entities."""
+    coordinators = hass.data[DOMAIN][entry.entry_id]
+    entities = []
+    for coordinator in coordinators.values():
+        if isinstance(coordinator.device, IndoorUnit):
+            entities.append(MitsubishiComfortClimate(coordinator))
+    async_add_entities(entities)
 
 _MODE_TO_HVAC: dict[str, HVACMode] = {
     "off": HVACMode.OFF,
