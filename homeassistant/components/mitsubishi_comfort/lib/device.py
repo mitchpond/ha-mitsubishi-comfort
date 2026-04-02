@@ -68,6 +68,23 @@ class Device:
             ))
         return self._session
 
+    async def _fetch_sensors(self) -> list[dict]:
+        """Fetch external sensor data from all slots."""
+        from .const import MAX_SENSORS
+        sensors = []
+        for i in range(MAX_SENSORS):
+            query = f'{{"c":{{"sensors":{{"{i}":{{}}}}}}}}'.encode()
+            response = await self.request(query)
+            try:
+                sensor = response["r"]["sensors"][str(i)]
+                if isinstance(sensor, dict) and sensor.get("uuid"):
+                    sensors.append(sensor)
+                else:
+                    break
+            except (KeyError, TypeError):
+                break
+        return sensors
+
     async def close(self) -> None:
         """Close the underlying HTTP session."""
         if self._session and not self._session.closed:

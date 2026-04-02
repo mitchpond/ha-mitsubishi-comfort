@@ -11,8 +11,6 @@ from homeassistant.components.climate.const import (
     HVACMode,
 )
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -22,6 +20,7 @@ from .lib.types import CommandResult, FanSpeed, Mode, VaneDirection
 
 from .const import DOMAIN
 from .coordinator import MitsubishiComfortCoordinator
+from .entity import MitsubishiComfortEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,7 +56,7 @@ _HVAC_TO_MODE: dict[HVACMode, Mode] = {
     HVACMode.HEAT_COOL: Mode.AUTO,
 }
 
-_MODE_TO_LIB: dict[str, Mode] = {m.value: m for m in Mode}
+_LIB_MODE_TO_HVAC: dict[Mode, HVACMode] = {v: k for k, v in _HVAC_TO_MODE.items()}
 
 _MODE_TO_ACTION: dict[str, HVACAction] = {
     "off": HVACAction.OFF,
@@ -74,14 +73,13 @@ _FAN_SPEED_MAP: dict[str, FanSpeed] = {s.value: s for s in FanSpeed}
 _VANE_DIR_MAP: dict[str, VaneDirection] = {d.value: d for d in VaneDirection}
 
 
-class MitsubishiComfortClimate(CoordinatorEntity[MitsubishiComfortCoordinator], ClimateEntity):
+class MitsubishiComfortClimate(MitsubishiComfortEntity, ClimateEntity):
     """Climate entity for a Mitsubishi indoor unit."""
 
     _enable_turn_on_off_backwards_compatibility = False
 
     def __init__(self, coordinator: MitsubishiComfortCoordinator) -> None:
         super().__init__(coordinator)
-        self._device: IndoorUnit = coordinator.device
         self._attr_name = self._device.name
         self._attr_unique_id = self._device.serial
 
@@ -102,10 +100,6 @@ class MitsubishiComfortClimate(CoordinatorEntity[MitsubishiComfortCoordinator], 
         super()._handle_coordinator_update()
 
     # -- Properties --
-
-    @property
-    def available(self) -> bool:
-        return self.coordinator.available
 
     @property
     def temperature_unit(self) -> str:
@@ -131,15 +125,7 @@ class MitsubishiComfortClimate(CoordinatorEntity[MitsubishiComfortCoordinator], 
 
     @property
     def hvac_modes(self) -> list[HVACMode]:
-        lib_mode_to_hvac = {
-            Mode.OFF: HVACMode.OFF,
-            Mode.COOL: HVACMode.COOL,
-            Mode.HEAT: HVACMode.HEAT,
-            Mode.DRY: HVACMode.DRY,
-            Mode.FAN: HVACMode.FAN_ONLY,
-            Mode.AUTO: HVACMode.HEAT_COOL,
-        }
-        return [lib_mode_to_hvac[m] for m in self._device.supported_modes if m in lib_mode_to_hvac]
+        return [_LIB_MODE_TO_HVAC[m] for m in self._device.supported_modes if m in _LIB_MODE_TO_HVAC]
 
     @property
     def current_temperature(self) -> float | None:
@@ -232,19 +218,6 @@ class MitsubishiComfortClimate(CoordinatorEntity[MitsubishiComfortCoordinator], 
         if self._device.supported_vane_directions:
             features |= ClimateEntityFeature.SWING_MODE
         return features
-
-    @property
-    def device_info(self):
-        info = {
-            "identifiers": {("mitsubishi_comfort", self._device.serial)},
-            "name": self._device.name,
-            "manufacturer": "Mitsubishi",
-        }
-        if self._device.status.firmware_version:
-            info["sw_version"] = self._device.status.firmware_version
-        if self._device.status.hardware_version:
-            info["hw_version"] = self._device.status.hardware_version
-        return info
 
     @property
     def extra_state_attributes(self):

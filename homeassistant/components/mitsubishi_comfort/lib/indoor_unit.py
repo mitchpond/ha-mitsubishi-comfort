@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 
-from .const import MAX_SENSORS
 from .device import Device
 from .types import CommandResult, DeviceStatus, FanSpeed, Mode, VaneDirection
 
@@ -33,8 +32,8 @@ class IndoorUnit(Device):
         super().__init__(**kwargs)
         self._status = DeviceStatus()
         self._profile: dict = {}
-        self._sensors: list[dict] = []
         self._profile_fetched = False
+        self._has_mhk2: bool = True
 
     @property
     def status(self) -> DeviceStatus:
@@ -82,18 +81,7 @@ class IndoorUnit(Device):
             return False
 
         # Sensors (always fetch)
-        sensors = []
-        for i in range(MAX_SENSORS):
-            query = f'{{"c":{{"sensors":{{"{i}":{{}}}}}}}}'.encode()
-            response = await self.request(query)
-            try:
-                sensor = response["r"]["sensors"][str(i)]
-                if isinstance(sensor, dict) and sensor.get("uuid"):
-                    sensors.append(sensor)
-                else:
-                    break
-            except (KeyError, TypeError):
-                break
+        sensors = await self._fetch_sensors()
 
         # Profile, adapter status, adapter info, MHK2 — only on first poll
         min_cool_sp = None
@@ -156,14 +144,17 @@ class IndoorUnit(Device):
                 _LOGGER.debug("Device %s: could not retrieve adapter info", self._name)
 
             # MHK2 humidity (optional)
-            query = b'{"c":{"mhk2":{"status":{}}}}'
-            response = await self.request(query)
-            try:
-                mhk2 = response.get("r", {}).get("mhk2")
-                if isinstance(mhk2, dict):
-                    mhk2_humidity = mhk2.get("status", {}).get("indoorHumid")
-            except (KeyError, TypeError):
-                pass
+            if self._has_mhk2:
+                query = b'{"c":{"mhk2":{"status":{}}}}'
+                response = await self.request(query)
+                try:
+                    mhk2 = response.get("r", {}).get("mhk2")
+                    if isinstance(mhk2, dict) and mhk2.get("status"):
+                        mhk2_humidity = mhk2.get("status", {}).get("indoorHumid")
+                    else:
+                        self._has_mhk2 = False
+                except (KeyError, TypeError):
+                    self._has_mhk2 = False
 
             self._profile_fetched = True
         else:
@@ -185,15 +176,18 @@ class IndoorUnit(Device):
                 run_state = self._status.run_state
                 uptime = self._status.uptime
 
-            # MHK2 humidity (optional, always fetch)
-            query = b'{"c":{"mhk2":{"status":{}}}}'
-            response = await self.request(query)
-            try:
-                mhk2 = response.get("r", {}).get("mhk2")
-                if isinstance(mhk2, dict):
-                    mhk2_humidity = mhk2.get("status", {}).get("indoorHumid")
-            except (KeyError, TypeError):
-                pass
+            # MHK2 humidity (optional, skip if previously returned no data)
+            if self._has_mhk2:
+                query = b'{"c":{"mhk2":{"status":{}}}}'
+                response = await self.request(query)
+                try:
+                    mhk2 = response.get("r", {}).get("mhk2")
+                    if isinstance(mhk2, dict) and mhk2.get("status"):
+                        mhk2_humidity = mhk2.get("status", {}).get("indoorHumid")
+                    else:
+                        self._has_mhk2 = False
+                except (KeyError, TypeError):
+                    self._has_mhk2 = False
 
             # Carry forward cached values from previous status
             min_cool_sp = self._status.min_cool_setpoint
@@ -217,7 +211,6 @@ class IndoorUnit(Device):
         if humidity is None and mhk2_humidity is not None:
             humidity = mhk2_humidity
 
-        self._sensors = sensors
         self._status = DeviceStatus(
             mode=raw.get("mode"),
             standby=raw.get("standby"),

@@ -85,9 +85,6 @@ class MitsubishiComfortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class MitsubishiComfortOptionsFlow(config_entries.OptionsFlow):
     """Handle options flow."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self._config_entry = config_entry
-
     async def async_step_init(self, user_input=None):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
@@ -98,13 +95,13 @@ class MitsubishiComfortOptionsFlow(config_entries.OptionsFlow):
                 {
                     vol.Required(
                         CONF_CONNECT_TIMEOUT,
-                        default=self._config_entry.options.get(
+                        default=self.config_entry.options.get(
                             CONF_CONNECT_TIMEOUT, 1.2
                         ),
                     ): vol.Coerce(float),
                     vol.Required(
                         CONF_RESPONSE_TIMEOUT,
-                        default=self._config_entry.options.get(
+                        default=self.config_entry.options.get(
                             CONF_RESPONSE_TIMEOUT, 8.0
                         ),
                     ): vol.Coerce(float),

@@ -66,6 +66,17 @@ def _load_cached_credentials(hass: HomeAssistant) -> dict[str, dict]:
     return {}
 
 
+def _make_device(
+    info: DeviceInfo, serial: str, connect_timeout: float, response_timeout: float
+) -> IndoorUnit | KumoStation:
+    cls = IndoorUnit if info.is_indoor_unit else KumoStation
+    return cls(
+        name=info.label, address=info.address,
+        password_b64=info.password, crypto_serial_hex=info.crypto_serial,
+        serial=serial, connect_timeout=connect_timeout, response_timeout=response_timeout,
+    )
+
+
 def _save_credentials(hass: HomeAssistant, devices: dict[str, DeviceInfo]) -> None:
     """Save device credentials to cache."""
     cache = {}
@@ -160,26 +171,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: MitsubishiComfortConfigE
             )
             continue
 
-        if info.is_indoor_unit:
-            device = IndoorUnit(
-                name=info.label,
-                address=info.address,
-                password_b64=info.password,
-                crypto_serial_hex=info.crypto_serial,
-                serial=serial,
-                connect_timeout=connect_timeout,
-                response_timeout=response_timeout,
-            )
-        else:
-            device = KumoStation(
-                name=info.label,
-                address=info.address,
-                password_b64=info.password,
-                crypto_serial_hex=info.crypto_serial,
-                serial=serial,
-                connect_timeout=connect_timeout,
-                response_timeout=response_timeout,
-            )
+        device = _make_device(info, serial, connect_timeout, response_timeout)
         coordinators[serial] = MitsubishiComfortCoordinator(hass, device)
 
     if not coordinators:
@@ -246,26 +238,7 @@ async def _retry_incomplete_devices(
             incomplete_serials.remove(serial)
             _LOGGER.info("Device %s now has complete credentials", info.label)
 
-            if info.is_indoor_unit:
-                device = IndoorUnit(
-                    name=info.label,
-                    address=info.address,
-                    password_b64=info.password,
-                    crypto_serial_hex=info.crypto_serial,
-                    serial=serial,
-                    connect_timeout=connect_timeout,
-                    response_timeout=response_timeout,
-                )
-            else:
-                device = KumoStation(
-                    name=info.label,
-                    address=info.address,
-                    password_b64=info.password,
-                    crypto_serial_hex=info.crypto_serial,
-                    serial=serial,
-                    connect_timeout=connect_timeout,
-                    response_timeout=response_timeout,
-                )
+            device = _make_device(info, serial, connect_timeout, response_timeout)
             coordinators[serial] = MitsubishiComfortCoordinator(hass, device)
 
         # Save updated credentials
@@ -274,10 +247,6 @@ async def _retry_incomplete_devices(
         # Reload the entire entry to pick up new entities cleanly
         await hass.config_entries.async_reload(entry.entry_id)
         return  # The reload will re-run async_setup_entry with all devices
-
-        if not incomplete_serials:
-            _LOGGER.info("All devices now have complete credentials")
-            return
 
     if incomplete_serials:
         _LOGGER.warning(

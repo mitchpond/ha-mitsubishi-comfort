@@ -5,7 +5,6 @@ from __future__ import annotations
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import PERCENTAGE, SIGNAL_STRENGTH_DECIBELS, UnitOfTemperature
 from homeassistant.helpers.entity import EntityCategory
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -15,6 +14,7 @@ from .lib import IndoorUnit, KumoStation
 
 from .const import DOMAIN
 from .coordinator import MitsubishiComfortCoordinator
+from .entity import MitsubishiComfortEntity
 
 
 async def async_setup_entry(
@@ -40,33 +40,15 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MitsubishiComfortSensorBase(CoordinatorEntity[MitsubishiComfortCoordinator], SensorEntity):
+class MitsubishiComfortSensorBase(MitsubishiComfortEntity, SensorEntity):
     """Base class for Mitsubishi Comfort sensors."""
 
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: MitsubishiComfortCoordinator, suffix: str) -> None:
         super().__init__(coordinator)
-        self._device = coordinator.device
         self._attr_unique_id = f"{self._device.serial}-{suffix}"
         self._attr_name = f"{self._device.name} {suffix.replace('-', ' ').title()}"
-
-    @property
-    def available(self) -> bool:
-        return self.coordinator.available
-
-    @property
-    def device_info(self):
-        info = {
-            "identifiers": {("mitsubishi_comfort", self._device.serial)},
-            "name": self._device.name,
-            "manufacturer": "Mitsubishi",
-        }
-        if self._device.status.firmware_version:
-            info["sw_version"] = self._device.status.firmware_version
-        if self._device.status.hardware_version:
-            info["hw_version"] = self._device.status.hardware_version
-        return info
 
 
 class MitsubishiComfortTemperatureSensor(MitsubishiComfortSensorBase):
