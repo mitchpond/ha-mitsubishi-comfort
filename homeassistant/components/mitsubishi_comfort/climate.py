@@ -17,8 +17,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from mitsubishi_comfort import IndoorUnit
-from mitsubishi_comfort.types import CommandResult, FanSpeed, Mode, VaneDirection
+from .lib import IndoorUnit
+from .lib.types import CommandResult, FanSpeed, Mode, VaneDirection
 
 from .const import DOMAIN
 from .coordinator import MitsubishiComfortCoordinator
@@ -101,7 +101,7 @@ class MitsubishiComfortClimate(CoordinatorEntity[MitsubishiComfortCoordinator], 
         self._optimistic_vane_direction = None
         super()._handle_coordinator_update()
 
-    # ── Properties ──────────────────────────────────
+    # -- Properties --
 
     @property
     def available(self) -> bool:
@@ -113,7 +113,9 @@ class MitsubishiComfortClimate(CoordinatorEntity[MitsubishiComfortCoordinator], 
 
     @property
     def _effective_mode(self) -> str | None:
-        return self._optimistic_mode or self._device.status.mode
+        if self._optimistic_mode is not None:
+            return self._optimistic_mode
+        return self._device.status.mode
 
     @property
     def hvac_mode(self) -> HVACMode | None:
@@ -151,28 +153,38 @@ class MitsubishiComfortClimate(CoordinatorEntity[MitsubishiComfortCoordinator], 
     def target_temperature(self) -> float | None:
         mode = self._effective_mode
         if mode in ("cool", "autoCool"):
-            return self._optimistic_cool_setpoint or self._device.status.cool_setpoint
+            if self._optimistic_cool_setpoint is not None:
+                return self._optimistic_cool_setpoint
+            return self._device.status.cool_setpoint
         if mode in ("heat", "autoHeat"):
-            return self._optimistic_heat_setpoint or self._device.status.heat_setpoint
+            if self._optimistic_heat_setpoint is not None:
+                return self._optimistic_heat_setpoint
+            return self._device.status.heat_setpoint
         return None
 
     @property
     def target_temperature_high(self) -> float | None:
         mode = self._effective_mode
         if mode in ("auto", "autoCool", "autoHeat"):
-            return self._optimistic_cool_setpoint or self._device.status.cool_setpoint
+            if self._optimistic_cool_setpoint is not None:
+                return self._optimistic_cool_setpoint
+            return self._device.status.cool_setpoint
         return None
 
     @property
     def target_temperature_low(self) -> float | None:
         mode = self._effective_mode
         if mode in ("auto", "autoCool", "autoHeat"):
-            return self._optimistic_heat_setpoint or self._device.status.heat_setpoint
+            if self._optimistic_heat_setpoint is not None:
+                return self._optimistic_heat_setpoint
+            return self._device.status.heat_setpoint
         return None
 
     @property
     def fan_mode(self) -> str | None:
-        return self._optimistic_fan_speed or self._device.status.fan_speed
+        if self._optimistic_fan_speed is not None:
+            return self._optimistic_fan_speed
+        return self._device.status.fan_speed
 
     @property
     def fan_modes(self) -> list[str]:
@@ -180,11 +192,33 @@ class MitsubishiComfortClimate(CoordinatorEntity[MitsubishiComfortCoordinator], 
 
     @property
     def swing_mode(self) -> str | None:
-        return self._optimistic_vane_direction or self._device.status.vane_direction
+        if self._optimistic_vane_direction is not None:
+            return self._optimistic_vane_direction
+        return self._device.status.vane_direction
 
     @property
     def swing_modes(self) -> list[str]:
         return [d.value for d in self._device.supported_vane_directions]
+
+    @property
+    def min_temp(self) -> float:
+        mode = self._effective_mode
+        if mode in ("heat", "autoHeat"):
+            if self._device.status.min_heat_setpoint is not None:
+                return self._device.status.min_heat_setpoint
+        if self._device.status.min_cool_setpoint is not None:
+            return self._device.status.min_cool_setpoint
+        return super().min_temp
+
+    @property
+    def max_temp(self) -> float:
+        mode = self._effective_mode
+        if mode in ("heat", "autoHeat"):
+            if self._device.status.max_heat_setpoint is not None:
+                return self._device.status.max_heat_setpoint
+        if self._device.status.max_cool_setpoint is not None:
+            return self._device.status.max_cool_setpoint
+        return super().max_temp
 
     @property
     def supported_features(self) -> ClimateEntityFeature:
@@ -201,13 +235,25 @@ class MitsubishiComfortClimate(CoordinatorEntity[MitsubishiComfortCoordinator], 
 
     @property
     def device_info(self):
-        return {
+        info = {
             "identifiers": {("mitsubishi_comfort", self._device.serial)},
             "name": self._device.name,
             "manufacturer": "Mitsubishi",
         }
+        if self._device.status.firmware_version:
+            info["sw_version"] = self._device.status.firmware_version
+        if self._device.status.hardware_version:
+            info["hw_version"] = self._device.status.hardware_version
+        return info
 
-    # ── Commands ────────────────────────────────────
+    @property
+    def extra_state_attributes(self):
+        attrs = {}
+        if self._device.status.vane_left_right is not None:
+            attrs["vane_left_right"] = self._device.status.vane_left_right
+        return attrs
+
+    # -- Commands --
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         lib_mode = _HVAC_TO_MODE.get(hvac_mode)

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import PERCENTAGE, SIGNAL_STRENGTH_DECIBELS, UnitOfTemperature
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from mitsubishi_comfort import IndoorUnit, KumoStation
+from .lib import IndoorUnit, KumoStation
 
 from .const import DOMAIN
 from .coordinator import MitsubishiComfortCoordinator
@@ -23,13 +24,19 @@ async def async_setup_entry(
     coordinators = hass.data[DOMAIN][entry.entry_id]
     entities = []
     for coordinator in coordinators.values():
-        entities.append(MitsubishiComfortTemperatureSensor(coordinator))
-        entities.append(MitsubishiComfortHumiditySensor(coordinator))
+        # Common sensors
         entities.append(MitsubishiComfortWifiSignalSensor(coordinator))
-        entities.append(MitsubishiComfortSensorBatterySensor(coordinator))
-        entities.append(MitsubishiComfortSensorSignalSensor(coordinator))
+        # Indoor unit sensors
+        if isinstance(coordinator.device, IndoorUnit):
+            entities.append(MitsubishiComfortTemperatureSensor(coordinator))
+            entities.append(MitsubishiComfortHumiditySensor(coordinator))
+            entities.append(MitsubishiComfortSensorBatterySensor(coordinator))
+            entities.append(MitsubishiComfortSensorSignalSensor(coordinator))
+            entities.append(MitsubishiComfortUptimeSensor(coordinator))
+        # KumoStation sensors
         if isinstance(coordinator.device, KumoStation):
             entities.append(MitsubishiComfortOutdoorTemperatureSensor(coordinator))
+            entities.append(MitsubishiComfortUptimeSensor(coordinator))
     async_add_entities(entities)
 
 
@@ -50,11 +57,16 @@ class MitsubishiComfortSensorBase(CoordinatorEntity[MitsubishiComfortCoordinator
 
     @property
     def device_info(self):
-        return {
+        info = {
             "identifiers": {("mitsubishi_comfort", self._device.serial)},
             "name": self._device.name,
             "manufacturer": "Mitsubishi",
         }
+        if self._device.status.firmware_version:
+            info["sw_version"] = self._device.status.firmware_version
+        if self._device.status.hardware_version:
+            info["hw_version"] = self._device.status.hardware_version
+        return info
 
 
 class MitsubishiComfortTemperatureSensor(MitsubishiComfortSensorBase):
@@ -140,3 +152,18 @@ class MitsubishiComfortOutdoorTemperatureSensor(MitsubishiComfortSensorBase):
     @property
     def native_value(self) -> float | None:
         return self._device.status.outdoor_temperature
+
+
+class MitsubishiComfortUptimeSensor(MitsubishiComfortSensorBase):
+    """Device uptime sensor."""
+
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = "s"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: MitsubishiComfortCoordinator) -> None:
+        super().__init__(coordinator, "uptime")
+
+    @property
+    def native_value(self) -> int | None:
+        return self._device.status.uptime

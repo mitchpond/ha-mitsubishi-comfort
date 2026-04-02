@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from mitsubishi_comfort import IndoorUnit, KumoStation
+from .lib import IndoorUnit, KumoStation
 
 from .const import DEFAULT_SCAN_INTERVAL
 
@@ -48,3 +48,8 @@ class MitsubishiComfortCoordinator(DataUpdateCoordinator[None]):
                 self.device.name,
                 self._consecutive_failures,
             )
+            if self._consecutive_failures >= MAX_FAILURES_BEFORE_UNAVAILABLE:
+                raise UpdateFailed(
+                    f"Device {self.device.name} unavailable after "
+                    f"{self._consecutive_failures} failures"
+                )

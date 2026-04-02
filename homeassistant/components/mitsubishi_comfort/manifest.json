@@ -10,5 +10,6 @@
   ],
   "integration_type": "hub",
   "iot_class": "local_polling",
-  "requirements": ["mitsubishi-comfort==0.1.0"]
+  "requirements": [],
+  "version": "0.1.0"
 }

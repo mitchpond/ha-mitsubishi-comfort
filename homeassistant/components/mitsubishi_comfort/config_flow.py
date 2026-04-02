@@ -9,7 +9,7 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
 
-from mitsubishi_comfort import MitsubishiCloudAccount
+from .lib import MitsubishiCloudAccount
 
 from .const import CONF_CONNECT_TIMEOUT, CONF_RESPONSE_TIMEOUT, DOMAIN
 
@@ -55,7 +55,7 @@ class MitsubishiComfortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 CONF_PASSWORD: user_input[CONF_PASSWORD],
                             },
                         )
-            except (ConnectionError, OSError):
+            except OSError:
                 errors["base"] = "cannot_connect"
             except Exception:
                 _LOGGER.exception("Unexpected error during setup")
@@ -66,7 +66,12 @@ class MitsubishiComfortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_dhcp(self, discovery_info):
-        """Handle DHCP discovery."""
+        """Handle DHCP discovery -- store IP for later use."""
+        _LOGGER.info(
+            "DHCP discovered: %s (%s)", discovery_info.ip, discovery_info.macaddress
+        )
+        discovered = self.hass.data.setdefault(f"{DOMAIN}_dhcp_discovered", {})
+        discovered[discovery_info.macaddress] = discovery_info.ip
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
         return await self.async_step_user()
@@ -91,8 +96,18 @@ class MitsubishiComfortOptionsFlow(config_entries.OptionsFlow):
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_CONNECT_TIMEOUT, default=1.2): vol.Coerce(float),
-                    vol.Required(CONF_RESPONSE_TIMEOUT, default=8.0): vol.Coerce(float),
+                    vol.Required(
+                        CONF_CONNECT_TIMEOUT,
+                        default=self._config_entry.options.get(
+                            CONF_CONNECT_TIMEOUT, 1.2
+                        ),
+                    ): vol.Coerce(float),
+                    vol.Required(
+                        CONF_RESPONSE_TIMEOUT,
+                        default=self._config_entry.options.get(
+                            CONF_RESPONSE_TIMEOUT, 8.0
+                        ),
+                    ): vol.Coerce(float),
                 }
             ),
         )
