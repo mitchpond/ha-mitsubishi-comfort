@@ -1,0 +1,14 @@
+{
+  "domain": "mitsubishi_comfort",
+  "name": "Mitsubishi Comfort",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://www.home-assistant.io/integrations/mitsubishi_comfort",
+  "dhcp": [
+    {"macaddress": "24CD8D*"},
+    {"macaddress": "7087A7*"}
+  ],
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "requirements": ["mitsubishi-comfort==0.1.0"]
+}

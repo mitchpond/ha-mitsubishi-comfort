@@ -1,0 +1,255 @@
+"""Climate entity for Mitsubishi Comfort integration."""
+
+from __future__ import annotations
+
+import logging
+
+from homeassistant.components.climate import ClimateEntity
+from homeassistant.components.climate.const import (
+    ClimateEntityFeature,
+    HVACAction,
+    HVACMode,
+)
+from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from mitsubishi_comfort import IndoorUnit
+from mitsubishi_comfort.types import CommandResult, FanSpeed, Mode, VaneDirection
+
+from .coordinator import MitsubishiComfortCoordinator
+
+_LOGGER = logging.getLogger(__name__)
+
+_MODE_TO_HVAC: dict[str, HVACMode] = {
+    "off": HVACMode.OFF,
+    "cool": HVACMode.COOL,
+    "heat": HVACMode.HEAT,
+    "dry": HVACMode.DRY,
+    "vent": HVACMode.FAN_ONLY,
+    "auto": HVACMode.HEAT_COOL,
+    "autoCool": HVACMode.HEAT_COOL,
+    "autoHeat": HVACMode.HEAT_COOL,
+}
+
+_HVAC_TO_MODE: dict[HVACMode, Mode] = {
+    HVACMode.OFF: Mode.OFF,
+    HVACMode.COOL: Mode.COOL,
+    HVACMode.HEAT: Mode.HEAT,
+    HVACMode.DRY: Mode.DRY,
+    HVACMode.FAN_ONLY: Mode.FAN,
+    HVACMode.HEAT_COOL: Mode.AUTO,
+}
+
+_MODE_TO_LIB: dict[str, Mode] = {m.value: m for m in Mode}
+
+_MODE_TO_ACTION: dict[str, HVACAction] = {
+    "off": HVACAction.OFF,
+    "cool": HVACAction.COOLING,
+    "heat": HVACAction.HEATING,
+    "dry": HVACAction.DRYING,
+    "vent": HVACAction.FAN,
+    "auto": HVACAction.IDLE,
+    "autoCool": HVACAction.COOLING,
+    "autoHeat": HVACAction.HEATING,
+}
+
+_FAN_SPEED_MAP: dict[str, FanSpeed] = {s.value: s for s in FanSpeed}
+_VANE_DIR_MAP: dict[str, VaneDirection] = {d.value: d for d in VaneDirection}
+
+
+class MitsubishiComfortClimate(CoordinatorEntity[MitsubishiComfortCoordinator], ClimateEntity):
+    """Climate entity for a Mitsubishi indoor unit."""
+
+    _enable_turn_on_off_backwards_compatibility = False
+
+    def __init__(self, coordinator: MitsubishiComfortCoordinator) -> None:
+        super().__init__(coordinator)
+        self._device: IndoorUnit = coordinator.device
+        self._attr_name = self._device.name
+        self._attr_unique_id = self._device.serial
+
+        # Optimistic state — set on successful command, cleared on next poll
+        self._optimistic_mode: str | None = None
+        self._optimistic_cool_setpoint: float | None = None
+        self._optimistic_heat_setpoint: float | None = None
+        self._optimistic_fan_speed: str | None = None
+        self._optimistic_vane_direction: str | None = None
+
+    def _handle_coordinator_update(self) -> None:
+        """Clear optimistic state when real data arrives from device."""
+        self._optimistic_mode = None
+        self._optimistic_cool_setpoint = None
+        self._optimistic_heat_setpoint = None
+        self._optimistic_fan_speed = None
+        self._optimistic_vane_direction = None
+        super()._handle_coordinator_update()
+
+    # ── Properties ──────────────────────────────────
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.available
+
+    @property
+    def temperature_unit(self) -> str:
+        return UnitOfTemperature.CELSIUS
+
+    @property
+    def _effective_mode(self) -> str | None:
+        return self._optimistic_mode or self._device.status.mode
+
+    @property
+    def hvac_mode(self) -> HVACMode | None:
+        mode = self._effective_mode
+        return _MODE_TO_HVAC.get(mode) if mode else None
+
+    @property
+    def hvac_action(self) -> HVACAction | None:
+        mode = self._device.status.mode
+        if mode and self._device.status.standby:
+            return HVACAction.IDLE
+        return _MODE_TO_ACTION.get(mode) if mode else None
+
+    @property
+    def hvac_modes(self) -> list[HVACMode]:
+        lib_mode_to_hvac = {
+            Mode.OFF: HVACMode.OFF,
+            Mode.COOL: HVACMode.COOL,
+            Mode.HEAT: HVACMode.HEAT,
+            Mode.DRY: HVACMode.DRY,
+            Mode.FAN: HVACMode.FAN_ONLY,
+            Mode.AUTO: HVACMode.HEAT_COOL,
+        }
+        return [lib_mode_to_hvac[m] for m in self._device.supported_modes if m in lib_mode_to_hvac]
+
+    @property
+    def current_temperature(self) -> float | None:
+        return self._device.status.room_temperature
+
+    @property
+    def current_humidity(self) -> float | None:
+        return self._device.status.current_humidity
+
+    @property
+    def target_temperature(self) -> float | None:
+        mode = self._effective_mode
+        if mode in ("cool", "autoCool"):
+            return self._optimistic_cool_setpoint or self._device.status.cool_setpoint
+        if mode in ("heat", "autoHeat"):
+            return self._optimistic_heat_setpoint or self._device.status.heat_setpoint
+        return None
+
+    @property
+    def target_temperature_high(self) -> float | None:
+        mode = self._effective_mode
+        if mode in ("auto", "autoCool", "autoHeat"):
+            return self._optimistic_cool_setpoint or self._device.status.cool_setpoint
+        return None
+
+    @property
+    def target_temperature_low(self) -> float | None:
+        mode = self._effective_mode
+        if mode in ("auto", "autoCool", "autoHeat"):
+            return self._optimistic_heat_setpoint or self._device.status.heat_setpoint
+        return None
+
+    @property
+    def fan_mode(self) -> str | None:
+        return self._optimistic_fan_speed or self._device.status.fan_speed
+
+    @property
+    def fan_modes(self) -> list[str]:
+        return [s.value for s in self._device.supported_fan_speeds]
+
+    @property
+    def swing_mode(self) -> str | None:
+        return self._optimistic_vane_direction or self._device.status.vane_direction
+
+    @property
+    def swing_modes(self) -> list[str]:
+        return [d.value for d in self._device.supported_vane_directions]
+
+    @property
+    def supported_features(self) -> ClimateEntityFeature:
+        features = (
+            ClimateEntityFeature.TARGET_TEMPERATURE
+            | ClimateEntityFeature.FAN_MODE
+            | ClimateEntityFeature.TURN_OFF
+        )
+        if Mode.AUTO in self._device.supported_modes:
+            features |= ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
+        if self._device.supported_vane_directions:
+            features |= ClimateEntityFeature.SWING_MODE
+        return features
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {("mitsubishi_comfort", self._device.serial)},
+            "name": self._device.name,
+            "manufacturer": "Mitsubishi",
+        }
+
+    # ── Commands ────────────────────────────────────
+
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        lib_mode = _HVAC_TO_MODE.get(hvac_mode)
+        if lib_mode is None:
+            return
+        result = await self._device.set_mode(lib_mode)
+        if result.success:
+            self._optimistic_mode = result.value
+            self.async_write_ha_state()
+
+    async def async_set_temperature(self, **kwargs) -> None:
+        mode = self._effective_mode
+        wrote = False
+
+        if "target_temp_high" in kwargs:
+            result = await self._device.set_cool_setpoint(kwargs["target_temp_high"])
+            if result.success:
+                self._optimistic_cool_setpoint = result.value
+                wrote = True
+
+        if "target_temp_low" in kwargs:
+            result = await self._device.set_heat_setpoint(kwargs["target_temp_low"])
+            if result.success:
+                self._optimistic_heat_setpoint = result.value
+                wrote = True
+
+        temp = kwargs.get(ATTR_TEMPERATURE)
+        if temp is not None:
+            if mode in ("cool", "autoCool"):
+                result = await self._device.set_cool_setpoint(temp)
+                if result.success:
+                    self._optimistic_cool_setpoint = result.value
+                    wrote = True
+            elif mode in ("heat", "autoHeat"):
+                result = await self._device.set_heat_setpoint(temp)
+                if result.success:
+                    self._optimistic_heat_setpoint = result.value
+                    wrote = True
+
+        if wrote:
+            self.async_write_ha_state()
+
+    async def async_set_fan_mode(self, fan_mode: str) -> None:
+        speed = _FAN_SPEED_MAP.get(fan_mode)
+        if speed is None:
+            return
+        result = await self._device.set_fan_speed(speed)
+        if result.success:
+            self._optimistic_fan_speed = result.value
+            self.async_write_ha_state()
+
+    async def async_set_swing_mode(self, swing_mode: str) -> None:
+        direction = _VANE_DIR_MAP.get(swing_mode)
+        if direction is None:
+            return
+        result = await self._device.set_vane_direction(direction)
+        if result.success:
+            self._optimistic_vane_direction = result.value
+            self.async_write_ha_state()
+
+    async def async_turn_off(self) -> None:
+        await self.async_set_hvac_mode(HVACMode.OFF)
