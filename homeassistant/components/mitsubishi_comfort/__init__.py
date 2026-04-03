@@ -23,7 +23,7 @@ _LOGGER = logging.getLogger(__name__)
 
 CREDENTIAL_CACHE = "mitsubishi_comfort_devices.json"
 
-type MitsubishiComfortConfigEntry = ConfigEntry
+MitsubishiComfortConfigEntry = ConfigEntry
 
 
 def _load_cached_credentials(hass: HomeAssistant) -> dict[str, dict]:
