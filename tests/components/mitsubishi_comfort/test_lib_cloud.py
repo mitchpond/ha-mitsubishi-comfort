@@ -13,6 +13,7 @@ from homeassistant.components.mitsubishi_comfort.lib.cloud import (
     _SIO_EVENT,
 )
 from homeassistant.components.mitsubishi_comfort.lib.const import V3_BASE_URL
+from homeassistant.components.mitsubishi_comfort.lib.exceptions import AuthenticationError
 
 
 def _make_account() -> MitsubishiCloudAccount:
@@ -33,21 +34,20 @@ class TestLogin:
                     }
                 },
             )
-            result = await account.login()
+            await account.login()
 
-        assert result is True
         assert account._access_token == "access_jwt_here"
         assert account._refresh_token == "refresh_jwt_here"
         await account.close()
 
     async def test_login_failure(self):
-        """Returns False on HTTP error."""
+        """Raises AuthenticationError when the login is rejected."""
         account = _make_account()
         with aioresponses() as m:
             m.post(f"{V3_BASE_URL}/v3/login", status=401)
-            result = await account.login()
+            with pytest.raises(AuthenticationError):
+                await account.login()
 
-        assert result is False
         assert account._access_token is None
         await account.close()
 
@@ -172,6 +172,10 @@ class TestDiscoverDevices:
                         },
                     }
                 ],
+            )
+            m.get(
+                f"{V3_BASE_URL}/v3/devices/SER001/status",
+                payload={"mac": "AA:BB:CC:DD:EE:FF"},
             )
 
             # No websocket call expected because cached credentials include password

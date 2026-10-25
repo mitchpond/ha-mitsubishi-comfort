@@ -15,7 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .lib import IndoorUnit
+from .lib import CloudIndoorUnit, IndoorUnit
 from .lib.types import CommandResult, FanSpeed, Mode, VaneDirection
 
 from .const import DOMAIN
@@ -29,10 +29,10 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up Mitsubishi Comfort climate entities."""
-    coordinators = hass.data[DOMAIN][entry.entry_id]
+    coordinators = hass.data[DOMAIN][entry.entry_id]["coordinators"]
     entities = []
     for coordinator in coordinators.values():
-        if isinstance(coordinator.device, IndoorUnit):
+        if isinstance(coordinator.device, (IndoorUnit, CloudIndoorUnit)):
             entities.append(MitsubishiComfortClimate(coordinator))
     async_add_entities(entities)
 

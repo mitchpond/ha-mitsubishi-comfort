@@ -13,6 +13,10 @@ class DeviceConnectionError(MitsubishiComfortError):
     """Could not reach the device or cloud API."""
 
 
+# Backward compatibility
+ConnectionError = DeviceConnectionError
+
+
 class DeviceUnavailableError(MitsubishiComfortError):
     """Device is not responding to local API requests."""
 

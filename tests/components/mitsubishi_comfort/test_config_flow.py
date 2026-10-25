@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from homeassistant.components.mitsubishi_comfort.lib.exceptions import AuthenticationError
 from homeassistant.components.mitsubishi_comfort.lib.types import DeviceInfo
 
 
@@ -26,7 +27,7 @@ class TestUserStep:
         assert result["step_id"] == "user"
 
     async def test_user_step_invalid_auth(self):
-        """Login failure shows invalid_auth error."""
+        """A rejected login shows invalid_auth error."""
         from homeassistant.components.mitsubishi_comfort.config_flow import (
             MitsubishiComfortConfigFlow,
         )
@@ -40,7 +41,7 @@ class TestUserStep:
             "homeassistant.components.mitsubishi_comfort.config_flow.MitsubishiCloudAccount"
         ) as mock_cls:
             account = AsyncMock()
-            account.login = AsyncMock(return_value=False)
+            account.login = AsyncMock(side_effect=AuthenticationError("rejected"))
             mock_cls.return_value = account
 
             result = await flow.async_step_user(

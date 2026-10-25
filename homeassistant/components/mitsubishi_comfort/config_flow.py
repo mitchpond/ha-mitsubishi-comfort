@@ -10,6 +10,7 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
 
 from .lib import MitsubishiCloudAccount
+from .lib.exceptions import AuthenticationError, DeviceConnectionError
 
 from .const import CONF_CONNECT_TIMEOUT, CONF_RESPONSE_TIMEOUT, DOMAIN
 
@@ -41,21 +42,21 @@ class MitsubishiComfortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
             try:
-                if not await account.login():
-                    errors["base"] = "invalid_auth"
+                await account.login()
+                devices = await account.discover_devices()
+                if not devices:
+                    errors["base"] = "cannot_connect"
                 else:
-                    devices = await account.discover_devices()
-                    if not devices:
-                        errors["base"] = "cannot_connect"
-                    else:
-                        return self.async_create_entry(
-                            title=user_input[CONF_USERNAME],
-                            data={
-                                CONF_USERNAME: user_input[CONF_USERNAME],
-                                CONF_PASSWORD: user_input[CONF_PASSWORD],
-                            },
-                        )
-            except OSError:
+                    return self.async_create_entry(
+                        title=user_input[CONF_USERNAME],
+                        data={
+                            CONF_USERNAME: user_input[CONF_USERNAME],
+                            CONF_PASSWORD: user_input[CONF_PASSWORD],
+                        },
+                    )
+            except AuthenticationError:
+                errors["base"] = "invalid_auth"
+            except (DeviceConnectionError, OSError):
                 errors["base"] = "cannot_connect"
             except Exception:
                 _LOGGER.exception("Unexpected error during setup")

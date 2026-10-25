@@ -10,7 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .lib import IndoorUnit, KumoStation
+from .lib import CloudIndoorUnit, IndoorUnit, KumoStation
 
 from .const import DOMAIN
 from .coordinator import MitsubishiComfortCoordinator
@@ -21,22 +21,24 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up Mitsubishi Comfort sensor entities."""
-    coordinators = hass.data[DOMAIN][entry.entry_id]
+    coordinators = hass.data[DOMAIN][entry.entry_id]["coordinators"]
     entities = []
     for coordinator in coordinators.values():
-        # Common sensors
-        entities.append(MitsubishiComfortWifiSignalSensor(coordinator))
-        # Indoor unit sensors
-        if isinstance(coordinator.device, IndoorUnit):
+        # Local-only sensors (LAN adapter data)
+        if isinstance(coordinator.device, (IndoorUnit, KumoStation)):
+            entities.append(MitsubishiComfortWifiSignalSensor(coordinator))
+            entities.append(MitsubishiComfortUptimeSensor(coordinator))
+        # Indoor unit sensors (local or cloud)
+        if isinstance(coordinator.device, (IndoorUnit, CloudIndoorUnit)):
             entities.append(MitsubishiComfortTemperatureSensor(coordinator))
             entities.append(MitsubishiComfortHumiditySensor(coordinator))
+        # Local indoor unit-only sensors (require LAN adapter)
+        if isinstance(coordinator.device, IndoorUnit):
             entities.append(MitsubishiComfortSensorBatterySensor(coordinator))
             entities.append(MitsubishiComfortSensorSignalSensor(coordinator))
-            entities.append(MitsubishiComfortUptimeSensor(coordinator))
         # KumoStation sensors
         if isinstance(coordinator.device, KumoStation):
             entities.append(MitsubishiComfortOutdoorTemperatureSensor(coordinator))
-            entities.append(MitsubishiComfortUptimeSensor(coordinator))
     async_add_entities(entities)
 
 

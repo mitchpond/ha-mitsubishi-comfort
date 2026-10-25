@@ -55,6 +55,7 @@ class DeviceInfo:
     unit_type: str
     password: str
     crypto_serial: str
+    site_id: str = ""
 
     @property
     def is_indoor_unit(self) -> bool:
@@ -87,3 +88,5 @@ class DeviceStatus:
     max_cool_setpoint: float | None = None
     min_heat_setpoint: float | None = None
     max_heat_setpoint: float | None = None
+    min_auto_setpoint: float | None = None
+    max_auto_setpoint: float | None = None

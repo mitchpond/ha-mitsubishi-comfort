@@ -7,7 +7,7 @@ import logging
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .lib import IndoorUnit, KumoStation
+from .lib import CloudIndoorUnit, IndoorUnit, KumoStation
 
 from .const import DEFAULT_SCAN_INTERVAL
 
@@ -22,7 +22,7 @@ class MitsubishiComfortCoordinator(DataUpdateCoordinator[None]):
     def __init__(
         self,
         hass: HomeAssistant,
-        device: IndoorUnit | KumoStation,
+        device: IndoorUnit | KumoStation | CloudIndoorUnit,
     ) -> None:
         super().__init__(
             hass,
