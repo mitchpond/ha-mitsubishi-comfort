@@ -1,20 +1,71 @@
 {
   "config": {
     "abort": {
-      "already_configured": "Device is already configured"
+      "already_configured": "Account is already configured",
+      "single_instance_allowed": "Already configured. Only a single configuration is possible."
     },
     "error": {
       "cannot_connect": "Failed to connect",
       "invalid_auth": "Invalid authentication",
+      "no_devices": "No devices were found in your Kumo Cloud account",
       "unknown": "Unexpected error"
     },
     "step": {
       "user": {
         "data": {
-          "username": "Username",
-          "password": "Password"
-        }
+          "password": "Password",
+          "username": "Username"
+        },
+        "data_description": {
+          "password": "The password for your Kumo Cloud account.",
+          "username": "The email address you use to sign in to the Kumo Cloud app."
+        },
+        "description": "Sign in with your Kumo Cloud account. Units are controlled over your local network when possible and through the cloud otherwise."
       }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "filter_dirty": {
+        "name": "Filter dirty"
+      }
+    },
+    "sensor": {
+      "current_humidity": {
+        "name": "Current humidity"
+      },
+      "current_temperature": {
+        "name": "Current temperature"
+      },
+      "outdoor_temperature": {
+        "name": "Outdoor temperature"
+      },
+      "sensor_battery": {
+        "name": "Sensor battery"
+      },
+      "sensor_signal": {
+        "name": "Sensor signal"
+      },
+      "uptime": {
+        "name": "Uptime"
+      },
+      "wifi_signal": {
+        "name": "Wi-Fi signal"
+      }
+    }
+  },
+  "exceptions": {
+    "set_fan_mode_failed": {
+      "message": "{device_name} did not accept the requested fan mode"
+    },
+    "set_hvac_mode_failed": {
+      "message": "{device_name} did not accept the requested HVAC mode"
+    },
+    "set_swing_mode_failed": {
+      "message": "{device_name} did not accept the requested swing mode"
+    },
+    "set_temperature_failed": {
+      "message": "{device_name} did not accept the requested temperature"
     }
   },
   "options": {
@@ -23,6 +74,10 @@
         "data": {
           "connect_timeout": "Connection timeout (seconds)",
           "response_timeout": "Response timeout (seconds)"
+        },
+        "data_description": {
+          "connect_timeout": "How long to wait when opening a connection to a unit on the local network.",
+          "response_timeout": "How long to wait for a unit on the local network to answer a request."
         }
       }
     }

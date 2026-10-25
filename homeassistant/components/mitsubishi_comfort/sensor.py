@@ -1,153 +1,155 @@
 """Sensor entities for Mitsubishi Comfort integration."""
 
-from __future__ import annotations
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import override
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import PERCENTAGE, SIGNAL_STRENGTH_DECIBELS, UnitOfTemperature
-from homeassistant.helpers.entity import EntityCategory
+from mitsubishi_comfort import CloudIndoorUnit, IndoorUnit, KumoStation
+from mitsubishi_comfort.types import DeviceStatus
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+    SensorStateClass,
+)
+from homeassistant.const import (
+    PERCENTAGE,
+    SIGNAL_STRENGTH_DECIBELS,
+    EntityCategory,
+    UnitOfTemperature,
+    UnitOfTime,
+)
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .lib import CloudIndoorUnit, IndoorUnit, KumoStation
-
-from .const import DOMAIN
-from .coordinator import MitsubishiComfortCoordinator
+from .coordinator import (
+    MitsubishiComfortConfigEntry,
+    MitsubishiComfortCoordinator,
+    MitsubishiComfortDevice,
+)
 from .entity import MitsubishiComfortEntity
+
+PARALLEL_UPDATES = 0
+
+
+@dataclass(frozen=True, kw_only=True)
+class MitsubishiComfortSensorEntityDescription(SensorEntityDescription):
+    """Describes a Mitsubishi Comfort sensor."""
+
+    value_fn: Callable[[DeviceStatus], float | int | None]
+    device_types: tuple[type[MitsubishiComfortDevice], ...]
+
+
+# Signal, uptime and external-sensor data come from the LAN adapter, so
+# cloud-controlled units only get temperature and humidity.
+SENSORS: tuple[MitsubishiComfortSensorEntityDescription, ...] = (
+    MitsubishiComfortSensorEntityDescription(
+        key="current-temperature",
+        translation_key="current_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda status: status.room_temperature,
+        device_types=(IndoorUnit, CloudIndoorUnit),
+    ),
+    MitsubishiComfortSensorEntityDescription(
+        key="current-humidity",
+        translation_key="current_humidity",
+        device_class=SensorDeviceClass.HUMIDITY,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        entity_registry_enabled_default=False,
+        value_fn=lambda status: status.current_humidity,
+        device_types=(IndoorUnit, CloudIndoorUnit),
+    ),
+    MitsubishiComfortSensorEntityDescription(
+        key="wifi-signal",
+        translation_key="wifi_signal",
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda status: status.wifi_rssi,
+        device_types=(IndoorUnit, KumoStation),
+    ),
+    MitsubishiComfortSensorEntityDescription(
+        key="sensor-battery",
+        translation_key="sensor_battery",
+        device_class=SensorDeviceClass.BATTERY,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda status: status.sensor_battery,
+        device_types=(IndoorUnit,),
+    ),
+    MitsubishiComfortSensorEntityDescription(
+        key="sensor-signal",
+        translation_key="sensor_signal",
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda status: status.sensor_rssi,
+        device_types=(IndoorUnit,),
+    ),
+    MitsubishiComfortSensorEntityDescription(
+        key="outdoor-temperature",
+        translation_key="outdoor_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        entity_registry_enabled_default=False,
+        value_fn=lambda status: status.outdoor_temperature,
+        device_types=(KumoStation,),
+    ),
+    MitsubishiComfortSensorEntityDescription(
+        key="uptime",
+        translation_key="uptime",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=lambda status: status.uptime,
+        device_types=(IndoorUnit, KumoStation),
+    ),
+)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: MitsubishiComfortConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Mitsubishi Comfort sensor entities."""
-    coordinators = hass.data[DOMAIN][entry.entry_id]["coordinators"]
-    entities = []
-    for coordinator in coordinators.values():
-        # Local-only sensors (LAN adapter data)
-        if isinstance(coordinator.device, (IndoorUnit, KumoStation)):
-            entities.append(MitsubishiComfortWifiSignalSensor(coordinator))
-            entities.append(MitsubishiComfortUptimeSensor(coordinator))
-        # Indoor unit sensors (local or cloud)
-        if isinstance(coordinator.device, (IndoorUnit, CloudIndoorUnit)):
-            entities.append(MitsubishiComfortTemperatureSensor(coordinator))
-            entities.append(MitsubishiComfortHumiditySensor(coordinator))
-        # Local indoor unit-only sensors (require LAN adapter)
-        if isinstance(coordinator.device, IndoorUnit):
-            entities.append(MitsubishiComfortSensorBatterySensor(coordinator))
-            entities.append(MitsubishiComfortSensorSignalSensor(coordinator))
-        # KumoStation sensors
-        if isinstance(coordinator.device, KumoStation):
-            entities.append(MitsubishiComfortOutdoorTemperatureSensor(coordinator))
-    async_add_entities(entities)
+    async_add_entities(
+        MitsubishiComfortSensor(coordinator, description)
+        for coordinator in entry.runtime_data.coordinators.values()
+        for description in SENSORS
+        if isinstance(coordinator.device, description.device_types)
+    )
 
 
-class MitsubishiComfortSensorBase(MitsubishiComfortEntity, SensorEntity):
-    """Base class for Mitsubishi Comfort sensors."""
+class MitsubishiComfortSensor(MitsubishiComfortEntity, SensorEntity):
+    """Sensor for a Mitsubishi Comfort device."""
 
-    _attr_entity_registry_enabled_default = False
+    entity_description: MitsubishiComfortSensorEntityDescription
 
-    def __init__(self, coordinator: MitsubishiComfortCoordinator, suffix: str) -> None:
+    def __init__(
+        self,
+        coordinator: MitsubishiComfortCoordinator,
+        description: MitsubishiComfortSensorEntityDescription,
+    ) -> None:
+        """Initialize the sensor."""
         super().__init__(coordinator)
-        self._attr_unique_id = f"{self._device.serial}-{suffix}"
-        self._attr_name = f"{self._device.name} {suffix.replace('-', ' ').title()}"
-
-
-class MitsubishiComfortTemperatureSensor(MitsubishiComfortSensorBase):
-    """Current temperature sensor."""
-
-    _attr_device_class = SensorDeviceClass.TEMPERATURE
-    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-    _attr_entity_registry_enabled_default = True
-
-    def __init__(self, coordinator: MitsubishiComfortCoordinator) -> None:
-        super().__init__(coordinator, "current-temperature")
+        self.entity_description = description
+        self._attr_unique_id = f"{self._device.serial}-{description.key}"
 
     @property
-    def native_value(self) -> float | None:
-        return self._device.status.room_temperature
-
-
-class MitsubishiComfortHumiditySensor(MitsubishiComfortSensorBase):
-    """Current humidity sensor."""
-
-    _attr_device_class = SensorDeviceClass.HUMIDITY
-    _attr_native_unit_of_measurement = PERCENTAGE
-
-    def __init__(self, coordinator: MitsubishiComfortCoordinator) -> None:
-        super().__init__(coordinator, "current-humidity")
-
-    @property
-    def native_value(self) -> float | None:
-        return self._device.status.current_humidity
-
-
-class MitsubishiComfortWifiSignalSensor(MitsubishiComfortSensorBase):
-    """WiFi signal strength sensor."""
-
-    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
-    _attr_native_unit_of_measurement = SIGNAL_STRENGTH_DECIBELS
-
-    def __init__(self, coordinator: MitsubishiComfortCoordinator) -> None:
-        super().__init__(coordinator, "wifi-signal")
-
-    @property
-    def native_value(self) -> int | None:
-        return self._device.status.wifi_rssi
-
-
-class MitsubishiComfortSensorBatterySensor(MitsubishiComfortSensorBase):
-    """External sensor battery level."""
-
-    _attr_device_class = SensorDeviceClass.BATTERY
-    _attr_native_unit_of_measurement = PERCENTAGE
-
-    def __init__(self, coordinator: MitsubishiComfortCoordinator) -> None:
-        super().__init__(coordinator, "sensor-battery")
-
-    @property
-    def native_value(self) -> int | None:
-        return self._device.status.sensor_battery
-
-
-class MitsubishiComfortSensorSignalSensor(MitsubishiComfortSensorBase):
-    """External sensor signal strength."""
-
-    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
-    _attr_native_unit_of_measurement = SIGNAL_STRENGTH_DECIBELS
-
-    def __init__(self, coordinator: MitsubishiComfortCoordinator) -> None:
-        super().__init__(coordinator, "sensor-signal")
-
-    @property
-    def native_value(self) -> int | None:
-        return self._device.status.sensor_rssi
-
-
-class MitsubishiComfortOutdoorTemperatureSensor(MitsubishiComfortSensorBase):
-    """Outdoor temperature sensor (KumoStation only)."""
-
-    _attr_device_class = SensorDeviceClass.TEMPERATURE
-    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-
-    def __init__(self, coordinator: MitsubishiComfortCoordinator) -> None:
-        super().__init__(coordinator, "outdoor-temperature")
-
-    @property
-    def native_value(self) -> float | None:
-        return self._device.status.outdoor_temperature
-
-
-class MitsubishiComfortUptimeSensor(MitsubishiComfortSensorBase):
-    """Device uptime sensor."""
-
-    _attr_device_class = SensorDeviceClass.DURATION
-    _attr_native_unit_of_measurement = "s"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, coordinator: MitsubishiComfortCoordinator) -> None:
-        super().__init__(coordinator, "uptime")
-
-    @property
-    def native_value(self) -> int | None:
-        return self._device.status.uptime
+    @override
+    def native_value(self) -> float | int | None:
+        """Return the sensor value."""
+        return self.entity_description.value_fn(self._device.status)

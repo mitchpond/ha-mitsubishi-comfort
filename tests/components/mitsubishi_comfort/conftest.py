@@ -1,146 +1,104 @@
-"""Shared fixtures for Mitsubishi Comfort tests."""
+"""Fixtures for Mitsubishi Comfort tests."""
 
-from __future__ import annotations
+from collections.abc import Generator
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from unittest.mock import AsyncMock, MagicMock, PropertyMock
-
+from mitsubishi_comfort import CloudIndoorUnit, IndoorUnit, KumoStation
+from mitsubishi_comfort.types import DeviceInfo
 import pytest
 
-from homeassistant.components.mitsubishi_comfort.lib.types import (
-    CommandResult,
-    DeviceInfo,
-    DeviceStatus,
-    FanSpeed,
-    Mode,
-    VaneDirection,
-)
+from homeassistant.components.mitsubishi_comfort.const import DOMAIN
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.core import HomeAssistant
+
+from . import default_discovery, make_device
+
+from tests.common import MockConfigEntry
+
+
+@pytest.fixture(autouse=True)
+def no_retry_delay() -> Generator[None]:
+    """Run the background credential retry without waiting."""
+    with patch("homeassistant.components.mitsubishi_comfort.RETRY_DELAY", 0):
+        yield
 
 
 @pytest.fixture
-def mock_device_status() -> DeviceStatus:
-    """Return a realistic DeviceStatus."""
-    return DeviceStatus(
-        mode="cool",
-        standby=False,
-        heat_setpoint=21.0,
-        cool_setpoint=24.0,
-        room_temperature=23.5,
-        fan_speed="auto",
-        vane_direction="auto",
-        filter_dirty=False,
-        defrost=False,
-        current_humidity=45.0,
-        outdoor_temperature=30.0,
-        wifi_rssi=-55,
-        sensor_battery=80,
-        sensor_rssi=-60,
-        run_state="on",
-        vane_left_right="auto",
-        uptime=86400,
-        firmware_version="2.1.0",
-        hardware_version="1.0.0",
-        min_cool_setpoint=18.0,
-        max_cool_setpoint=30.0,
-        min_heat_setpoint=16.0,
-        max_heat_setpoint=28.0,
+def mock_config_entry() -> MockConfigEntry:
+    """Return the config entry for a Kumo Cloud account."""
+    return MockConfigEntry(
+        domain=DOMAIN,
+        title="user@example.com",
+        unique_id=DOMAIN,
+        data={CONF_USERNAME: "user@example.com", CONF_PASSWORD: "secret"},
     )
 
 
 @pytest.fixture
-def mock_indoor_unit(mock_device_status: DeviceStatus) -> MagicMock:
-    """Return a MagicMock of IndoorUnit with realistic attributes."""
-    unit = MagicMock()
-    unit.name = "Living Room"
-    unit.serial = "SERIAL001"
-    unit.address = "192.168.1.100"
-    type(unit).status = PropertyMock(return_value=mock_device_status)
-    unit.supported_modes = [Mode.OFF, Mode.COOL, Mode.HEAT, Mode.DRY, Mode.FAN, Mode.AUTO]
-    unit.supported_fan_speeds = [
-        FanSpeed.SUPER_QUIET,
-        FanSpeed.QUIET,
-        FanSpeed.LOW,
-        FanSpeed.POWERFUL,
-        FanSpeed.SUPER_POWERFUL,
-        FanSpeed.AUTO,
-    ]
-    unit.supported_vane_directions = [
-        VaneDirection.HORIZONTAL,
-        VaneDirection.MID_HORIZONTAL,
-        VaneDirection.MIDPOINT,
-        VaneDirection.MID_VERTICAL,
-        VaneDirection.VERTICAL,
-        VaneDirection.AUTO,
-        VaneDirection.SWING,
-    ]
-    unit.set_mode = AsyncMock(return_value=CommandResult(success=True, value="cool"))
-    unit.set_cool_setpoint = AsyncMock(return_value=CommandResult(success=True, value=24.0))
-    unit.set_heat_setpoint = AsyncMock(return_value=CommandResult(success=True, value=21.0))
-    unit.set_fan_speed = AsyncMock(return_value=CommandResult(success=True, value="auto"))
-    unit.set_vane_direction = AsyncMock(return_value=CommandResult(success=True, value="auto"))
-    unit.update_status = AsyncMock(return_value=True)
-    unit.close = AsyncMock()
-    return unit
-
-
-@pytest.fixture
-def mock_kumo_station() -> MagicMock:
-    """Return a MagicMock of KumoStation."""
-    station = MagicMock()
-    station.name = "Outdoor Unit"
-    station.serial = "KUMO001"
-    station.address = "192.168.1.101"
-    station.status = DeviceStatus(
-        outdoor_temperature=32.0,
-        wifi_rssi=-50,
-        sensor_rssi=-65,
-    )
-    station.update_status = AsyncMock(return_value=True)
-    station.close = AsyncMock()
-    return station
-
-
-@pytest.fixture
-def mock_coordinator(mock_indoor_unit: MagicMock) -> MagicMock:
-    """Return a MagicMock of MitsubishiComfortCoordinator."""
-    coordinator = MagicMock()
-    coordinator.device = mock_indoor_unit
-    coordinator.available = True
-    coordinator.async_request_refresh = AsyncMock()
-    return coordinator
-
-
-@pytest.fixture
-def mock_cloud_account() -> AsyncMock:
-    """Return an AsyncMock of MitsubishiCloudAccount."""
-    account = AsyncMock()
-    account.login = AsyncMock(return_value=True)
-    account.discover_devices = AsyncMock(return_value={
-        "SERIAL001": DeviceInfo(
-            serial="SERIAL001",
-            label="Living Room",
-            address="192.168.1.100",
-            mac="AA:BB:CC:DD:EE:FF",
-            unit_type="ductless",
-            password="dGVzdHBhc3M=",
-            crypto_serial="0102030405060708090a",
-        ),
-    })
-    account.get_sites = AsyncMock(return_value=[{"id": "site1", "name": "Home"}])
-    account.get_zones = AsyncMock(return_value=[])
-    account.refresh = AsyncMock(return_value=True)
+def mock_account() -> Generator[MagicMock]:
+    """Patch the cloud account used by setup and the config flow."""
+    account = MagicMock()
+    account.login = AsyncMock()
+    account.discover_devices = AsyncMock(side_effect=lambda **_: default_discovery())
+    account.get_passwords_via_websocket = AsyncMock(return_value={})
     account.close = AsyncMock()
-    return account
+    with (
+        patch(
+            "homeassistant.components.mitsubishi_comfort.MitsubishiCloudAccount",
+            return_value=account,
+        ),
+        patch(
+            "homeassistant.components.mitsubishi_comfort.config_flow.MitsubishiCloudAccount",
+            return_value=account,
+        ),
+    ):
+        yield account
 
 
 @pytest.fixture
-def mock_device_info() -> DeviceInfo:
-    """Return a real DeviceInfo instance."""
-    return DeviceInfo(
-        serial="SERIAL001",
-        label="Living Room",
-        address="192.168.1.100",
-        mac="AA:BB:CC:DD:EE:FF",
-        unit_type="ductless",
-        password="dGVzdHBhc3M=",
-        crypto_serial="0102030405060708090a",
-    )
+def mock_devices() -> Generator[dict[str, MagicMock]]:
+    """Patch the device classes, returning one mock device per serial."""
+    devices: dict[str, MagicMock] = {}
+
+    def local(cls: type) -> Any:
+        def factory(*, name: str, serial: str, **_: Any) -> MagicMock:
+            devices[serial] = make_device(cls, serial, name)
+            return devices[serial]
+
+        return factory
+
+    def cloud(info: DeviceInfo, account: Any) -> MagicMock:
+        devices[info.serial] = make_device(CloudIndoorUnit, info.serial, info.label)
+        return devices[info.serial]
+
+    with (
+        patch(
+            "homeassistant.components.mitsubishi_comfort.IndoorUnit",
+            side_effect=local(IndoorUnit),
+        ) as indoor,
+        patch(
+            "homeassistant.components.mitsubishi_comfort.KumoStation",
+            side_effect=local(KumoStation),
+        ),
+        patch(
+            "homeassistant.components.mitsubishi_comfort.CloudIndoorUnit",
+            side_effect=cloud,
+        ),
+    ):
+        devices["_indoor_cls"] = indoor
+        yield devices
+
+
+@pytest.fixture
+async def init_integration(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_account: MagicMock,
+    mock_devices: dict[str, MagicMock],
+) -> MockConfigEntry:
+    """Set up the integration with the default devices."""
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    return mock_config_entry

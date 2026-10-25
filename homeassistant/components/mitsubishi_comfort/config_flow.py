@@ -1,37 +1,82 @@
 """Config flow for Mitsubishi Comfort integration."""
 
-from __future__ import annotations
-
 import logging
+from typing import Any, override
 
-import voluptuous as vol
-from homeassistant import config_entries
+from mitsubishi_comfort import MitsubishiCloudAccount
+from mitsubishi_comfort.exceptions import AuthenticationError, DeviceConnectionError
+import probatio
+
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlowWithReload,
+)
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
-from .lib import MitsubishiCloudAccount
-from .lib.exceptions import AuthenticationError, DeviceConnectionError
-
-from .const import CONF_CONNECT_TIMEOUT, CONF_RESPONSE_TIMEOUT, DOMAIN
+from .const import (
+    CONF_CONNECT_TIMEOUT,
+    CONF_RESPONSE_TIMEOUT,
+    DEFAULT_CONNECT_TIMEOUT,
+    DEFAULT_RESPONSE_TIMEOUT,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-USER_SCHEMA = vol.Schema(
+USER_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_USERNAME): str,
-        vol.Required(CONF_PASSWORD): str,
+        probatio.Required(CONF_USERNAME): str,
+        probatio.Required(probatio.Secret(CONF_PASSWORD)): str,
     }
 )
 
 
-class MitsubishiComfortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class MitsubishiComfortOptionsFlow(OptionsFlowWithReload):
+    """Handle options flow."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Manage the connection timeouts."""
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=probatio.Schema(
+                {
+                    probatio.Required(
+                        CONF_CONNECT_TIMEOUT,
+                        default=self.config_entry.options.get(
+                            CONF_CONNECT_TIMEOUT, DEFAULT_CONNECT_TIMEOUT
+                        ),
+                    ): probatio.All(probatio.Coerce(float), probatio.Range(min=0.1)),
+                    probatio.Required(
+                        CONF_RESPONSE_TIMEOUT,
+                        default=self.config_entry.options.get(
+                            CONF_RESPONSE_TIMEOUT, DEFAULT_RESPONSE_TIMEOUT
+                        ),
+                    ): probatio.All(probatio.Coerce(float), probatio.Range(min=0.1)),
+                }
+            ),
+        )
+
+
+class MitsubishiComfortConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle config flow for Mitsubishi Comfort."""
 
     VERSION = 1
 
-    async def async_step_user(self, user_input=None):
+    @override
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Handle the user setup step."""
-        errors = {}
+        errors: dict[str, str] = {}
 
         if user_input is not None:
             await self.async_set_unique_id(DOMAIN)
@@ -40,13 +85,18 @@ class MitsubishiComfortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             account = MitsubishiCloudAccount(
                 user_input[CONF_USERNAME], user_input[CONF_PASSWORD]
             )
-
             try:
                 await account.login()
                 devices = await account.discover_devices()
-                if not devices:
-                    errors["base"] = "cannot_connect"
-                else:
+            except AuthenticationError:
+                errors["base"] = "invalid_auth"
+            except DeviceConnectionError, OSError:
+                errors["base"] = "cannot_connect"
+            except Exception:
+                _LOGGER.exception("Unexpected error during setup")
+                errors["base"] = "unknown"
+            else:
+                if devices:
                     return self.async_create_entry(
                         title=user_input[CONF_USERNAME],
                         data={
@@ -54,58 +104,34 @@ class MitsubishiComfortConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_PASSWORD: user_input[CONF_PASSWORD],
                         },
                     )
-            except AuthenticationError:
-                errors["base"] = "invalid_auth"
-            except (DeviceConnectionError, OSError):
-                errors["base"] = "cannot_connect"
-            except Exception:
-                _LOGGER.exception("Unexpected error during setup")
-                errors["base"] = "unknown"
+                errors["base"] = "no_devices"
+            finally:
+                await account.close()
 
         return self.async_show_form(
-            step_id="user", data_schema=USER_SCHEMA, errors=errors
+            step_id="user",
+            data_schema=USER_SCHEMA,
+            errors=errors,
         )
 
-    async def async_step_dhcp(self, discovery_info):
-        """Handle DHCP discovery -- store IP for later use."""
-        _LOGGER.info(
-            "DHCP discovered: %s (%s)", discovery_info.ip, discovery_info.macaddress
-        )
-        discovered = self.hass.data.setdefault(f"{DOMAIN}_dhcp_discovered", {})
-        discovered[discovery_info.macaddress] = discovery_info.ip
+    @override
+    async def async_step_dhcp(
+        self, discovery_info: DhcpServiceInfo
+    ) -> ConfigFlowResult:
+        """Offer setup when an adapter appears on the network.
+
+        Setup reads DHCP leases itself to find device addresses, so nothing
+        from the discovery needs to be kept.
+        """
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
         return await self.async_step_user()
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry):
-        return MitsubishiComfortOptionsFlow(config_entry)
-
-
-class MitsubishiComfortOptionsFlow(config_entries.OptionsFlow):
-    """Handle options flow."""
-
-    async def async_step_init(self, user_input=None):
-        if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
-
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_CONNECT_TIMEOUT,
-                        default=self.config_entry.options.get(
-                            CONF_CONNECT_TIMEOUT, 1.2
-                        ),
-                    ): vol.Coerce(float),
-                    vol.Required(
-                        CONF_RESPONSE_TIMEOUT,
-                        default=self.config_entry.options.get(
-                            CONF_RESPONSE_TIMEOUT, 8.0
-                        ),
-                    ): vol.Coerce(float),
-                }
-            ),
-        )
+    @override
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> MitsubishiComfortOptionsFlow:
+        """Return the options flow handler."""
+        return MitsubishiComfortOptionsFlow()
