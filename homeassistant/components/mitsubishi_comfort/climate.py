@@ -71,6 +71,8 @@ _MODE_TO_ACTION: dict[str, HVACAction] = {
     "autoHeat": HVACAction.HEATING,
 }
 
+_AUTO_MODES = ("auto", "autoCool", "autoHeat")
+
 _FAN_SPEED_MAP: dict[str, FanSpeed] = {s.value: s for s in FanSpeed}
 _VANE_DIR_MAP: dict[str, VaneDirection] = {d.value: d for d in VaneDirection}
 
@@ -151,13 +153,17 @@ class MitsubishiComfortClimate(MitsubishiComfortEntity, ClimateEntity):
     @property
     @override
     def target_temperature(self) -> float | None:
-        """Return the target temperature."""
+        """Return the setpoint for cool or heat mode.
+
+        Auto modes expose only the range, even while the unit is actively
+        cooling or heating, so the UI keeps showing both setpoints.
+        """
         mode = self._effective_mode
-        if mode in ("cool", "autoCool"):
+        if mode == "cool":
             if self._optimistic_cool_setpoint is not None:
                 return self._optimistic_cool_setpoint
             return self._device.status.cool_setpoint
-        if mode in ("heat", "autoHeat"):
+        if mode == "heat":
             if self._optimistic_heat_setpoint is not None:
                 return self._optimistic_heat_setpoint
             return self._device.status.heat_setpoint
@@ -167,8 +173,7 @@ class MitsubishiComfortClimate(MitsubishiComfortEntity, ClimateEntity):
     @override
     def target_temperature_high(self) -> float | None:
         """Return the upper bound of the auto range."""
-        mode = self._effective_mode
-        if mode in ("auto", "autoCool", "autoHeat"):
+        if self._effective_mode in _AUTO_MODES:
             if self._optimistic_cool_setpoint is not None:
                 return self._optimistic_cool_setpoint
             return self._device.status.cool_setpoint
@@ -178,8 +183,7 @@ class MitsubishiComfortClimate(MitsubishiComfortEntity, ClimateEntity):
     @override
     def target_temperature_low(self) -> float | None:
         """Return the lower bound of the auto range."""
-        mode = self._effective_mode
-        if mode in ("auto", "autoCool", "autoHeat"):
+        if self._effective_mode in _AUTO_MODES:
             if self._optimistic_heat_setpoint is not None:
                 return self._optimistic_heat_setpoint
             return self._device.status.heat_setpoint
@@ -216,25 +220,37 @@ class MitsubishiComfortClimate(MitsubishiComfortEntity, ClimateEntity):
     @property
     @override
     def min_temp(self) -> float:
-        """Return the minimum settable temperature."""
+        """Return the minimum setpoint, spanning both ranges in auto modes."""
+        status = self._device.status
         mode = self._effective_mode
-        if mode in ("heat", "autoHeat"):
-            if self._device.status.min_heat_setpoint is not None:
-                return self._device.status.min_heat_setpoint
-        if self._device.status.min_cool_setpoint is not None:
-            return self._device.status.min_cool_setpoint
+        heat, cool = status.min_heat_setpoint, status.min_cool_setpoint
+        if mode in _AUTO_MODES:
+            if status.min_auto_setpoint is not None:
+                return status.min_auto_setpoint
+            if limits := [v for v in (heat, cool) if v is not None]:
+                return min(limits)
+        elif mode == "heat" and heat is not None:
+            return heat
+        if cool is not None:
+            return cool
         return super().min_temp
 
     @property
     @override
     def max_temp(self) -> float:
-        """Return the maximum settable temperature."""
+        """Return the maximum setpoint, spanning both ranges in auto modes."""
+        status = self._device.status
         mode = self._effective_mode
-        if mode in ("heat", "autoHeat"):
-            if self._device.status.max_heat_setpoint is not None:
-                return self._device.status.max_heat_setpoint
-        if self._device.status.max_cool_setpoint is not None:
-            return self._device.status.max_cool_setpoint
+        heat, cool = status.max_heat_setpoint, status.max_cool_setpoint
+        if mode in _AUTO_MODES:
+            if status.max_auto_setpoint is not None:
+                return status.max_auto_setpoint
+            if limits := [v for v in (heat, cool) if v is not None]:
+                return max(limits)
+        elif mode == "heat" and heat is not None:
+            return heat
+        if cool is not None:
+            return cool
         return super().max_temp
 
     @property
