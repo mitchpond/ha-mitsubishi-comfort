@@ -129,6 +129,18 @@ class TestTargetTemperature:
         entity = _make_climate(mock_coordinator)
         assert entity.target_temperature is None
 
+    @pytest.mark.parametrize("mode", ["autoCool", "autoHeat"])
+    def test_target_temperature_auto_stage_returns_none(self, mock_coordinator, mode):
+        """While auto is cooling or heating, only the range is exposed."""
+        mock_coordinator.device.status.mode = mode
+        mock_coordinator.device.status.cool_setpoint = 25.0
+        mock_coordinator.device.status.heat_setpoint = 20.0
+        entity = _make_climate(mock_coordinator)
+        assert entity.hvac_mode == HVACMode.HEAT_COOL
+        assert entity.target_temperature is None
+        assert entity.target_temperature_high == 25.0
+        assert entity.target_temperature_low == 20.0
+
     def test_target_temperature_high_low_auto(self, mock_coordinator):
         """In auto mode, high/low return cool/heat setpoints."""
         mock_coordinator.device.status.mode = "auto"
@@ -163,6 +175,20 @@ class TestOptimisticState:
         assert entity._optimistic_cool_setpoint == 22.0
         assert entity.target_temperature == 22.0
         entity.async_write_ha_state.assert_called_once()
+
+    async def test_optimistic_set_temperature_heat(self, mock_coordinator):
+        """In heat mode, a single temperature sets the heat setpoint."""
+        mock_coordinator.device.status.mode = "heat"
+        mock_coordinator.device.set_heat_setpoint = AsyncMock(
+            return_value=CommandResult(success=True, value=19.5)
+        )
+        entity = _make_climate(mock_coordinator)
+        entity.async_write_ha_state = MagicMock()
+
+        await entity.async_set_temperature(temperature=19.5)
+        mock_coordinator.device.set_heat_setpoint.assert_awaited_once_with(19.5)
+        assert entity.target_temperature == 19.5
+        assert entity.target_temperature_low is None
 
     async def test_optimistic_set_temperature_failure(self, mock_coordinator):
         """After a failed command, no optimistic state change."""
@@ -202,6 +228,69 @@ class TestOptimisticState:
         entity._optimistic_cool_setpoint = 0.0
         # 0.0 is not None, so it should be returned
         assert entity.target_temperature == 0.0
+
+    async def test_optimistic_auto_mode_exposes_range(self, mock_coordinator):
+        """Switching to heat/cool shows both setpoints and no single setpoint."""
+        mock_coordinator.device.status.mode = "cool"
+        mock_coordinator.device.set_mode = AsyncMock(
+            return_value=CommandResult(success=True, value="auto")
+        )
+        entity = _make_climate(mock_coordinator)
+        entity.async_write_ha_state = MagicMock()
+
+        await entity.async_set_hvac_mode(HVACMode.HEAT_COOL)
+        assert entity.hvac_mode == HVACMode.HEAT_COOL
+        assert entity.target_temperature is None
+        assert entity.target_temperature_high == 24.0
+        assert entity.target_temperature_low == 21.0
+
+    @pytest.mark.parametrize("mode", ["auto", "autoCool", "autoHeat"])
+    async def test_optimistic_range_in_auto(self, mock_coordinator, mode):
+        """Setting the range in any auto variant updates both setpoints."""
+        mock_coordinator.device.status.mode = mode
+        mock_coordinator.device.set_cool_setpoint = AsyncMock(
+            return_value=CommandResult(success=True, value=26.0)
+        )
+        mock_coordinator.device.set_heat_setpoint = AsyncMock(
+            return_value=CommandResult(success=True, value=19.0)
+        )
+        entity = _make_climate(mock_coordinator)
+        entity.async_write_ha_state = MagicMock()
+
+        await entity.async_set_temperature(target_temp_low=19.0, target_temp_high=26.0)
+        mock_coordinator.device.set_cool_setpoint.assert_awaited_once_with(26.0)
+        mock_coordinator.device.set_heat_setpoint.assert_awaited_once_with(19.0)
+        assert entity.target_temperature is None
+        assert entity.target_temperature_high == 26.0
+        assert entity.target_temperature_low == 19.0
+        entity.async_write_ha_state.assert_called_once()
+
+    @pytest.mark.parametrize(
+        ("mode", "command", "other"),
+        [
+            ("autoCool", "set_cool_setpoint", "set_heat_setpoint"),
+            ("autoHeat", "set_heat_setpoint", "set_cool_setpoint"),
+        ],
+    )
+    async def test_single_setpoint_in_auto_stage(
+        self, mock_coordinator, mode, command, other
+    ):
+        """A single temperature in an auto stage sets that stage's setpoint."""
+        mock_coordinator.device.status.mode = mode
+        setattr(
+            mock_coordinator.device,
+            command,
+            AsyncMock(return_value=CommandResult(success=True, value=22.0)),
+        )
+        setattr(mock_coordinator.device, other, AsyncMock())
+        entity = _make_climate(mock_coordinator)
+        entity.async_write_ha_state = MagicMock()
+
+        await entity.async_set_temperature(temperature=22.0)
+        getattr(mock_coordinator.device, command).assert_awaited_once_with(22.0)
+        getattr(mock_coordinator.device, other).assert_not_awaited()
+        assert entity.target_temperature is None
+        entity.async_write_ha_state.assert_called_once()
 
 
 # ── Commands ──
@@ -291,6 +380,34 @@ class TestMinMaxTemp:
         entity = _make_climate(mock_coordinator)
         assert entity.min_temp == 16.0
         assert entity.max_temp == 28.0
+
+    @pytest.mark.parametrize("mode", ["auto", "autoCool", "autoHeat"])
+    def test_min_max_temp_auto(self, mock_coordinator, mode):
+        """Auto modes span the heat and cool limits so both setpoints fit."""
+        mock_coordinator.device.status.mode = mode
+        entity = _make_climate(mock_coordinator)
+        assert entity.min_temp == 16.0
+        assert entity.max_temp == 30.0
+
+    def test_min_max_temp_auto_partial_limits(self, mock_coordinator):
+        """Auto modes use whichever limits the profile provides."""
+        mock_coordinator.device.status.min_heat_setpoint = None
+        mock_coordinator.device.status.max_heat_setpoint = None
+        mock_coordinator.device.status.mode = "autoHeat"
+        entity = _make_climate(mock_coordinator)
+        assert entity.min_temp == 18.0
+        assert entity.max_temp == 30.0
+
+    def test_min_max_temp_auto_fallback(self, mock_coordinator):
+        """Auto modes return HA defaults when no limits are available."""
+        mock_coordinator.device.status.min_cool_setpoint = None
+        mock_coordinator.device.status.max_cool_setpoint = None
+        mock_coordinator.device.status.min_heat_setpoint = None
+        mock_coordinator.device.status.max_heat_setpoint = None
+        mock_coordinator.device.status.mode = "auto"
+        entity = _make_climate(mock_coordinator)
+        assert entity.min_temp == 7
+        assert entity.max_temp == 35
 
     def test_min_max_temp_fallback(self, mock_coordinator):
         """Returns HA defaults when profile limits not available."""
